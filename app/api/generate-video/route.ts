@@ -1,52 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { seedanceServer } from '@/lib/mcp-config'
+import { generateVideoViaMcp } from '@/lib/mcp-client'
 
 export async function POST(request: NextRequest) {
-  if (!seedanceServer.url) {
-    return NextResponse.json({ error: 'MCP server not configured' }, { status: 503 })
-  }
-
   try {
     const body = await request.json()
 
-    const payload = {
+    const data = await generateVideoViaMcp({
       prompt: body.prompt ?? '',
       image_urls: body.image_urls ?? [],
       resolution: body.resolution ?? '720p',
       duration: body.duration ?? 'auto',
       aspect_ratio: body.aspect_ratio ?? '9:16',
       generate_audio: body.generate_audio ?? true,
-    }
-
-    console.log('[generate-video] MCP server:', seedanceServer.url)
-    console.log('[generate-video] Payload:', JSON.stringify(payload, null, 2))
-
-    const response = await fetch(seedanceServer.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...seedanceServer.headers,
-      },
-      body: JSON.stringify(payload),
     })
 
-    const text = await response.text()
-    console.log('[generate-video] Status:', response.status)
-    console.log('[generate-video] Response:', text.slice(0, 500))
-
-    let data: unknown
-    try {
-      data = JSON.parse(text)
-    } catch {
-      return NextResponse.json(
-        { error: 'Invalid API response', raw: text.slice(0, 200) },
-        { status: 502 }
-      )
+    if (!data) {
+      return NextResponse.json({ error: 'Empty response from MCP server' }, { status: 502 })
     }
 
-    return NextResponse.json(data)
+    // MCP wraps the result in data.result.content[].text (JSON string) or directly in data.result
+    const mcpContent = data?.result?.content
+    if (Array.isArray(mcpContent)) {
+      for (const item of mcpContent) {
+        if (item.type === 'text' && item.text) {
+          try {
+            return NextResponse.json(JSON.parse(item.text))
+          } catch {
+            return NextResponse.json({ raw: item.text })
+          }
+        }
+      }
+    }
+
+    return NextResponse.json(data?.result ?? data)
   } catch (err) {
     console.error('[generate-video]', err)
-    return NextResponse.json({ error: 'Video generation failed' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Video generation failed'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

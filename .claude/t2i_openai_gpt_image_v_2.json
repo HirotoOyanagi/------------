@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "t2i-kamui-fal-openai-gpt-image-2": {
+      "type": "http",
+      "url": "https://kamui-code.ai/t2i/fal/openai/gpt-image-2",
+      "description": "OpenAI GPT Image 2 Text-to-Image (fal openai/gpt-image-2) - Next-gen image model (alpha), flexible resolution up to ~4K. prompt (required); image_size presets square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9 (default landscape_4_3) or image_width+image_height; quality low, medium, high (default high); num_images (default 1); output_format jpeg, png, webp (default png); sync_mode; optional openai_api_key (BYOK). Returns Fal queue JSON via Kamui Code ⭐⭐⭐",
+      "headers": {
+        "KAMUI-CODE-PASS": "${KAMUI_CODE_PASS_KEY}"
+      }
+    }
+  }
+}

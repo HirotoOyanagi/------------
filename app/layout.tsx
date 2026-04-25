@@ -1,37 +1,16 @@
 import type { Metadata } from 'next'
-import { Bebas_Neue, Syne, DM_Sans } from 'next/font/google'
+import type { ReactNode } from 'react'
 import './globals.css'
 
-const bebasNeue = Bebas_Neue({
-  weight: '400',
-  subsets: ['latin'],
-  variable: '--font-bebas',
-  display: 'swap',
-})
-
-const syne = Syne({
-  subsets: ['latin'],
-  weight: ['400', '600', '700', '800'],
-  variable: '--font-syne',
-  display: 'swap',
-})
-
-const dmSans = DM_Sans({
-  subsets: ['latin'],
-  weight: ['300', '400', '500'],
-  variable: '--font-dm',
-  display: 'swap',
-})
-
 export const metadata: Metadata = {
-  title: 'REELIFY — AI マーケティング動画生成',
-  description: '商品写真をAIマーケティング動画に変換し、SNSへ自動投稿',
-  keywords: ['AI動画', 'マーケティング', 'SNS投稿', 'Seedance', '自動化'],
+  title: 'Reelify Social Studio',
+  description: 'Google認証で始めるSNS投稿、作成、分析、コンテンツ管理のUIプロトタイプ',
+  keywords: ['SNS運用', '投稿管理', 'Google認証', 'コンテンツ作成', '分析'],
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ja" className={`${bebasNeue.variable} ${syne.variable} ${dmSans.variable}`}>
+    <html lang="ja">
       <body>{children}</body>
     </html>
   )

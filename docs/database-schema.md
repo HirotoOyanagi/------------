@@ -37,6 +37,17 @@
 | `brand_kits` | `id`, `owner_id`, `name`, `logo_asset_id`, `colors_json`, `fonts_json`, `created_at`, `updated_at` | ブランドカラー、フォント、ロゴ。 |
 | `generated_assets` | `id`, `owner_id`, `source_asset_id`, `prompt`, `model`, `generation_params_json`, `result_asset_id`, `status`, `error_message`, `created_at` | AI生成や変換ジョブの履歴。既存の画像・動画生成機能はここに集約。 |
 
+## AI生成ジョブ
+
+| テーブル | 主なカラム | 用途 |
+| --- | --- | --- |
+| `ai_model_configs` | `id`, `model_key`, `provider`, `modality`, `default_params_json`, `is_active`, `created_at` | 画像生成、動画生成、音声生成などのモデル設定。 |
+| `ai_generation_jobs` | `id`, `owner_id`, `project_id`, `job_type`, `prompt`, `negative_prompt`, `model_config_id`, `input_asset_ids`, `params_json`, `status`, `progress`, `error_message`, `started_at`, `completed_at`, `created_at` | AI生成リクエストの実行単位。UI上の「AIで生成」ボタンはここにジョブを作成します。 |
+| `ai_generation_outputs` | `id`, `job_id`, `asset_id`, `variant_no`, `score`, `metadata_json`, `selected_at`, `created_at` | 生成候補。画像の複数案、動画の複数レンダーを保存。 |
+| `ai_video_timelines` | `id`, `job_id`, `project_version_id`, `timeline_json`, `duration_ms`, `aspect_ratio`, `audio_asset_id`, `created_at` | AI動画の絵コンテ、シーン、字幕、BGM、タイムライン情報。 |
+| `prompt_presets` | `id`, `owner_id`, `name`, `modality`, `prompt`, `params_json`, `is_shared`, `created_at`, `updated_at` | よく使う画像・動画生成プロンプトのテンプレート。 |
+| `render_exports` | `id`, `project_id`, `project_version_id`, `asset_id`, `export_type`, `status`, `requested_by`, `created_at`, `completed_at` | 編集後の画像・動画を書き出すジョブ。 |
+
 ## 投稿・広告配信
 
 | テーブル | 主なカラム | 用途 |
@@ -64,6 +75,9 @@
 - `follows(follower_id, followee_id)` unique
 - `assets(owner_id, created_at desc)`
 - `content_projects(owner_id, updated_at desc)`
+- `ai_generation_jobs(owner_id, created_at desc)`
+- `ai_generation_jobs(status, created_at)`
+- `ai_generation_outputs(job_id, variant_no)`
 - `publish_targets(status, scheduled_at)`
 - `post_metric_snapshots(post_id, recorded_at)`
 
@@ -73,3 +87,4 @@
 - OAuthトークン、投稿ジョブのエラー、分析イベントは個人情報を含みやすいため、暗号化、監査ログ、削除処理を先に設計します。
 - タイムラインは`posts`と`follows`から生成できますが、規模が大きくなったら`timeline_items`のような配信用テーブルや検索基盤を追加します。
 - 編集画面の状態は`project_versions.editor_state_json`に保存し、最終レンダー済みの画像・動画は`assets`に保存します。
+- AI画像生成は`/api/generate-image`、AI動画のクリエイティブ生成は`/api/generate-creative-video`のようなジョブ作成APIから開始し、完了後に`ai_generation_outputs`と`assets`へ結果を保存します。

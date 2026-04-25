@@ -17,11 +17,7 @@ interface McpConfig {
  * 起動時に一度だけ読むのでファイルI/Oコストは無視できる。
  */
 function loadMcpServer(serverKey: string): McpServerConfig {
-  const configPath = path.join(
-    process.cwd(),
-    '.claude',
-    'r2v_bytedance_seedance_v_2_0_reference (1).json'
-  )
+  const configPath = path.join(process.cwd(), '.claude', 'kamui_fal_mcp.json')
 
   try {
     const raw = readFileSync(configPath, 'utf-8')

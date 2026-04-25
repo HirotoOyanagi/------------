@@ -39,3 +39,11 @@ function loadMcpServer(serverKey: string): McpServerConfig {
 export const seedanceServer = loadMcpServer(
   'r2v-kamui-bytedance-seedance-v20-reference'
 )
+
+export const imageGenerationServer = loadMcpServer(
+  't2i-kamui-fal-openai-gpt-image-2'
+)
+
+export const imageEditServer = loadMcpServer(
+  'i2i-kamui-fal-openai-gpt-image-2-edit'
+)

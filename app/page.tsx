@@ -1029,6 +1029,7 @@ function ImageEditorView({
   const [activeTool, setActiveTool] = useState('AI生成')
   const [title, setTitle] = useState('AI生成画像')
   const [uploadedName, setUploadedName] = useState('')
+  const [referenceImageDataUrl, setReferenceImageDataUrl] = useState('')
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [aspectRatio, setAspectRatio] = useState('16:9')
@@ -1041,6 +1042,7 @@ function ImageEditorView({
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [generated, setGenerated] = useState(false)
+  const [generatedImageUrls, setGeneratedImageUrls] = useState<string[]>([])
 
   const aspectToCss: Record<string, string> = {
     '16:9': '16 / 9',
@@ -1068,6 +1070,7 @@ function ImageEditorView({
       return
     }
     setGenerated(false)
+    setGeneratedImageUrls([])
     startMockAiJob(setProgress, setGenerating, async () => {
       let nextVariant = chooseVariantFromPrompt(prompt, variant)
       try {
@@ -1081,10 +1084,14 @@ function ImageEditorView({
             style: imageStyle,
             model,
             colorTone: colorTone === 'カスタム' ? customColor : colorTone,
+            image_urls: referenceImageDataUrl ? [referenceImageDataUrl] : [],
           }),
         })
         const data = await response.json()
         nextVariant = data?.candidates?.[0]?.variant ?? nextVariant
+        if (Array.isArray(data?.imageUrls)) {
+          setGeneratedImageUrls(data.imageUrls.filter((url: unknown): url is string => typeof url === 'string'))
+        }
       } catch {
         notify('API応答がないため、ローカルプレビューで生成しました')
       }
@@ -1180,7 +1187,12 @@ function ImageEditorView({
                       const file = event.target.files?.[0]
                       if (!file) return
                       setUploadedName(file.name)
-                      notify(`${file.name}を参照画像として設定しました`)
+                      const reader = new FileReader()
+                      reader.onload = () => {
+                        setReferenceImageDataUrl(typeof reader.result === 'string' ? reader.result : '')
+                        notify(`${file.name}を参照画像として設定しました`)
+                      }
+                      reader.readAsDataURL(file)
                     }}
                   />
                   <label htmlFor="ai-image-upload" className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
@@ -1342,20 +1354,32 @@ function ImageEditorView({
                     </button>
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    {variants.map((item) => (
+                    {(generatedImageUrls.length > 0 ? generatedImageUrls : variants).map((item, index) => (
                       <button
-                        key={item}
+                        key={typeof item === 'string' ? item : index}
                         type="button"
                         onClick={() => {
-                          setVariant(item)
+                          if (generatedImageUrls.length > 0) {
+                            notify(`生成画像 ${index + 1} を選択しました`)
+                            return
+                          }
+                          setVariant(item as CreativeVariant)
                           notify(`${item}案を選択しました`)
                         }}
-                        className={`rounded-md border bg-white p-2 text-left ${variant === item ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}
+                        className={`rounded-md border bg-white p-2 text-left ${
+                          generatedImageUrls.length === 0 && variant === item ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+                        }`}
                       >
                         <div className="w-full overflow-hidden rounded-md" style={{ aspectRatio: aspectToCss[aspectRatio] }}>
-                          <CreativeCard variant={item} className="h-full border-0" small={false} />
+                          {generatedImageUrls.length > 0 ? (
+                            <img src={item as string} alt={`生成画像 ${index + 1}`} className="h-full w-full object-cover" />
+                          ) : (
+                            <CreativeCard variant={item as CreativeVariant} className="h-full border-0" small={false} />
+                          )}
                         </div>
-                        <span className="mt-2 block text-xs font-semibold text-slate-600">候補: {item}</span>
+                        <span className="mt-2 block text-xs font-semibold text-slate-600">
+                          {generatedImageUrls.length > 0 ? `生成画像 ${index + 1}` : `候補: ${item}`}
+                        </span>
                       </button>
                     ))}
                   </div>

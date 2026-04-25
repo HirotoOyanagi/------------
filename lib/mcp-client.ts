@@ -1,4 +1,4 @@
-import { seedanceServer } from './mcp-config'
+import { imageEditServer, imageGenerationServer, seedanceServer } from './mcp-config'
 
 type JsonRpcRequest = {
   jsonrpc: '2.0'
@@ -55,6 +55,43 @@ function extractText(data: unknown): string | null {
   return null
 }
 
+function parseToolText(data: unknown): unknown {
+  const text = extractText(data)
+  if (!text) return data
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text.trim()
+  }
+}
+
+function extractRequestId(data: unknown): string | undefined {
+  const parsed = parseToolText(data)
+
+  if (typeof parsed === 'string') return parsed
+
+  if (parsed && typeof parsed === 'object') {
+    const p = parsed as Record<string, unknown>
+    return (p.request_id ?? p.requestId ?? p.id) as string | undefined
+  }
+
+  return undefined
+}
+
+function extractStatus(data: unknown): string | undefined {
+  const parsed = parseToolText(data)
+
+  if (typeof parsed === 'string') return parsed
+
+  if (parsed && typeof parsed === 'object') {
+    const p = parsed as Record<string, unknown>
+    return (p.status ?? p.state) as string | undefined
+  }
+
+  return undefined
+}
+
 export interface SeedanceParams {
   prompt: string
   image_urls: string[]
@@ -62,6 +99,166 @@ export interface SeedanceParams {
   duration?: string | number
   aspect_ratio?: string
   generate_audio?: boolean
+}
+
+export interface ImageGenerationParams {
+  prompt: string
+  image_urls?: string[]
+  image_size?: string
+  image_width?: number
+  image_height?: number
+  quality?: 'low' | 'medium' | 'high'
+  num_images?: number
+  output_format?: 'jpeg' | 'png' | 'webp'
+  sync_mode?: boolean
+}
+
+type ToolFlow = {
+  submit: string
+  status: string
+  result: string
+}
+
+async function initializeMcpSession(
+  url: string,
+  serverHeaders: Record<string, string>,
+  clientName: string
+) {
+  const init = await rpc(url, serverHeaders, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: clientName, version: '1.0.0' },
+    },
+  })
+
+  const sessionId = init.sessionId
+
+  rpc(url, serverHeaders, { jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId)
+    .catch(() => {})
+
+  return sessionId
+}
+
+async function runAsyncToolFlow(
+  server: { url: string; headers?: Record<string, string> },
+  tools: ToolFlow,
+  args: Record<string, unknown>,
+  logPrefix: string
+) {
+  const { url, headers: serverHeaders = {} } = server
+  const sessionId = await initializeMcpSession(url, serverHeaders, 'reelify')
+
+  console.log(`[${logPrefix}] submitting job...`)
+  const submitResult = await rpc(
+    url,
+    serverHeaders,
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: tools.submit,
+        arguments: args,
+      },
+    },
+    sessionId
+  )
+
+  const requestId = extractRequestId(submitResult.data)
+  console.log(`[${logPrefix}] request_id:`, requestId)
+
+  if (!requestId) {
+    throw new Error(`Submit did not return a request_id. Response: ${JSON.stringify(parseToolText(submitResult.data))}`)
+  }
+
+  const MAX_POLLS = 60
+  const POLL_MS = 5000
+
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
+
+    const statusResult = await rpc(
+      url,
+      serverHeaders,
+      {
+        jsonrpc: '2.0',
+        id: 3 + i,
+        method: 'tools/call',
+        params: {
+          name: tools.status,
+          arguments: { request_id: requestId },
+        },
+      },
+      sessionId
+    )
+
+    const status = extractStatus(statusResult.data)
+    console.log(`[${logPrefix}] poll ${i + 1}:`, status)
+
+    if (status === 'COMPLETED' || status === 'completed' || status === 'DONE' || status === 'SUCCEEDED') break
+    if (status === 'FAILED' || status === 'ERROR' || status === 'failed' || status === 'error') {
+      throw new Error(`Job failed: ${JSON.stringify(parseToolText(statusResult.data))}`)
+    }
+  }
+
+  const result = await rpc(
+    url,
+    serverHeaders,
+    {
+      jsonrpc: '2.0',
+      id: 100,
+      method: 'tools/call',
+      params: {
+        name: tools.result,
+        arguments: { request_id: requestId },
+      },
+    },
+    sessionId
+  )
+
+  const parsed = parseToolText(result.data)
+  console.log(`[${logPrefix}] final result:`, JSON.stringify(parsed)?.slice(0, 300))
+  return parsed
+}
+
+export async function generateImageViaMcp(params: ImageGenerationParams) {
+  const hasReferenceImages = Array.isArray(params.image_urls) && params.image_urls.length > 0
+
+  const server = hasReferenceImages ? imageEditServer : imageGenerationServer
+  const tools = hasReferenceImages
+    ? {
+        submit: 'openai_gpt_image_2_edit_submit',
+        status: 'openai_gpt_image_2_edit_status',
+        result: 'openai_gpt_image_2_edit_result',
+      }
+    : {
+        submit: 'openai_gpt_image_2_t2i_submit',
+        status: 'openai_gpt_image_2_t2i_status',
+        result: 'openai_gpt_image_2_t2i_result',
+      }
+
+  const args: Record<string, unknown> = {
+    prompt: params.prompt,
+    image_size: params.image_size ?? (hasReferenceImages ? 'auto' : 'landscape_16_9'),
+    quality: params.quality ?? 'high',
+    num_images: params.num_images ?? 1,
+    output_format: params.output_format ?? 'png',
+    sync_mode: params.sync_mode ?? false,
+  }
+
+  if (params.image_width && params.image_height) {
+    args.image_width = params.image_width
+    args.image_height = params.image_height
+    delete args.image_size
+  }
+
+  if (hasReferenceImages) args.image_urls = params.image_urls
+
+  return runAsyncToolFlow(server, tools, args, hasReferenceImages ? 'mcp-image-edit' : 'mcp-image')
 }
 
 /**

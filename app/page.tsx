@@ -1026,31 +1026,48 @@ function ImageEditorView({
   onSave: (item: ContentItem, next?: 'stay' | 'content' | 'publish') => void
   notify: Notify
 }) {
-  const [prompt, setPrompt] = useState('新作コレクションを紹介する、白背景で上品なSNS広告バナー')
-  const [title, setTitle] = useState('AI生成バナー')
-  const [variant, setVariant] = useState<CreativeVariant>('fashion')
-  const [variants, setVariants] = useState<CreativeVariant[]>(['fashion', 'natural', 'travel'])
   const [activeTool, setActiveTool] = useState('AI生成')
-  const [zoom, setZoom] = useState(66)
-  const [canvasSize, setCanvasSize] = useState('横長 1200x740')
+  const [title, setTitle] = useState('AI生成画像')
+  const [uploadedName, setUploadedName] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const [negativePrompt, setNegativePrompt] = useState('')
+  const [aspectRatio, setAspectRatio] = useState('16:9')
+  const [imageStyle, setImageStyle] = useState('スタイルを選択してください')
+  const [model, setModel] = useState('Image generation v1')
+  const [colorTone, setColorTone] = useState('指定なし')
+  const [customColor, setCustomColor] = useState('#0a7cff')
+  const [variant, setVariant] = useState<CreativeVariant>('natural')
+  const [variants, setVariants] = useState<CreativeVariant[]>([])
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [textVisible, setTextVisible] = useState(true)
-  const [textBold, setTextBold] = useState(true)
-  const [selectedColor, setSelectedColor] = useState('#232322')
+  const [generated, setGenerated] = useState(false)
+
+  const aspectToCss: Record<string, string> = {
+    '16:9': '16 / 9',
+    '4:5': '4 / 5',
+    '1:1': '1 / 1',
+    '3:2': '3 / 2',
+    '9:16': '9 / 16',
+    カスタム: '16 / 9',
+  }
 
   const generatedItem: ContentItem = {
     id: `asset-image-${title.replace(/\s/g, '-')}`,
     title,
     type: '画像',
     date: today,
-    status: '下書き',
+    status: generated ? '下書き' : '生成中',
     creative: variant,
     source: 'AI画像',
     prompt,
   }
 
   const runGenerate = () => {
+    if (!prompt.trim()) {
+      notify('プロンプトを入力してください')
+      return
+    }
+    setGenerated(false)
     startMockAiJob(setProgress, setGenerating, async () => {
       let nextVariant = chooseVariantFromPrompt(prompt, variant)
       try {
@@ -1059,8 +1076,11 @@ function ImageEditorView({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt,
-            aspectRatio: canvasSize.startsWith('正方形') ? '1:1' : '1.62:1',
-            model: 'image-generation-v1',
+            negativePrompt,
+            aspectRatio,
+            style: imageStyle,
+            model,
+            colorTone: colorTone === 'カスタム' ? customColor : colorTone,
           }),
         })
         const data = await response.json()
@@ -1070,40 +1090,25 @@ function ImageEditorView({
       }
       setVariant(nextVariant)
       setVariants([nextVariant, ...(['fashion', 'natural', 'travel'] as CreativeVariant[]).filter((item) => item !== nextVariant)])
+      setGenerated(true)
       notify('AI画像を生成しました')
     })
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="flex h-14 items-center justify-between border-b border-slate-200 px-4">
+    <div className="min-h-screen bg-[#f6f8fb]">
+      <div className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-5">
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-md hover:bg-slate-100">
-            <ArrowLeft className="h-4 w-4" />
+          <button type="button" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-md hover:bg-slate-100" aria-label="戻る">
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <button type="button" onClick={() => notify('ファイルメニューを開きました')} className="rounded-md px-3 py-2 text-sm hover:bg-slate-100">
-            ファイル
-          </button>
-          <button
-            type="button"
-            onClick={() => setCanvasSize((value) => (value === '横長 1200x740' ? '正方形 1080x1080' : '横長 1200x740'))}
-            className="rounded-md px-3 py-2 text-sm hover:bg-slate-100"
-          >
-            サイズ変更
-          </button>
+          <h1 className="text-xl font-semibold text-slate-950">AI画像生成</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setZoom((value) => (value >= 100 ? 66 : value + 17))}
-            className="rounded-md border border-slate-200 px-3 py-2 text-sm"
-          >
-            {zoom}%
-          </button>
-          <button
-            type="button"
             onClick={() => onSave(generatedItem, 'content')}
-            className="flex items-center gap-2 rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700"
+            className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
           >
             <Save className="h-4 w-4" />
             保存
@@ -1111,10 +1116,10 @@ function ImageEditorView({
           <button
             type="button"
             onClick={() => {
-              downloadTextFile(`${title}.txt`, `AI image prompt:\n${prompt}\n\nsize: ${canvasSize}`)
+              downloadTextFile(`${title}.txt`, `AI image prompt:\n${prompt}\n\nnegative:\n${negativePrompt}\n\naspect: ${aspectRatio}\nstyle: ${imageStyle}\nmodel: ${model}\ncolor: ${colorTone}`)
               notify('画像生成データをダウンロードしました')
             }}
-            className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+            className="flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
           >
             <Download className="h-4 w-4" />
             ダウンロード
@@ -1122,7 +1127,7 @@ function ImageEditorView({
         </div>
       </div>
 
-      <div className="grid min-h-[calc(100vh-56px)] grid-cols-1 lg:grid-cols-[172px_minmax(0,1fr)_300px]">
+      <div className="grid min-h-[calc(100vh-64px)] grid-cols-1 lg:grid-cols-[172px_minmax(0,1fr)]">
         <aside className="border-r border-slate-200 bg-white p-3">
           {[
             [Sparkles, 'AI生成'],
@@ -1142,7 +1147,7 @@ function ImageEditorView({
                 type="button"
                 onClick={() => {
                   setActiveTool(label as string)
-                  if (label !== 'AI生成') notify(`${label as string}パネルを開きました`)
+                  if (label !== 'AI生成') notify(`${label as string}パネルを開きました。AI生成フォームは保持されています`)
                 }}
                 className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm ${
                   active ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700 hover:bg-slate-50'
@@ -1155,133 +1160,231 @@ function ImageEditorView({
           })}
         </aside>
 
-        <section className="flex flex-col bg-[#f3f5f8] p-6">
-          <div className="mb-4 rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">AI画像生成</p>
-                <p className="text-xs text-slate-500">プロンプトからSNS広告バナー候補を作成します。</p>
-              </div>
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{canvasSize}</span>
+        <section className="bg-[#f6f8fb] p-4 md:p-6">
+          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">AI画像生成</h2>
+              <p className="mt-1 text-sm text-slate-500">プロンプトを入力し、画像の生成に必要な設定を行ってください。</p>
             </div>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              className="mt-3 h-20 w-full resize-none rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-500"
-            />
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+
+            <div className="mt-7 space-y-5">
+              <div>
+                <span className="mb-2 block text-sm font-semibold text-slate-900">画像の入力（任意）</span>
+                <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-7 text-center transition hover:border-blue-300 hover:bg-blue-50/20">
+                  <input
+                    id="ai-image-upload"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (!file) return
+                      setUploadedName(file.name)
+                      notify(`${file.name}を参照画像として設定しました`)
+                    }}
+                  />
+                  <label htmlFor="ai-image-upload" className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+                    <Upload className="h-4 w-4" />
+                    画像をアップロード
+                  </label>
+                  <p className="mt-3 text-sm font-medium text-slate-500">
+                    {uploadedName || '画像をドラッグ＆ドロップ、またはクリックして選択'}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-slate-400">対応形式：JPG / PNG / WEBP（最大10MB）</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label htmlFor="ai-image-prompt" className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    プロンプト
+                    <span className="grid h-4 w-4 place-items-center rounded-full border border-slate-300 text-[10px] text-slate-500">i</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPrompt('自然光が入る明るい部屋で、茶色いガラスボトルの商品を上品に見せるSNS広告用バナー。余白を広く取り、柔らかい植物を背景に入れる')}
+                    className="rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    プロンプト例を使う
+                  </button>
+                </div>
+                <textarea
+                  id="ai-image-prompt"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  className="h-24 w-full resize-none rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-500"
+                  placeholder="生成したい画像の内容を詳しく入力してください"
+                />
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-900">アスペクト比（横:縦）</p>
+                <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                  {[
+                    ['16:9', '横長'],
+                    ['4:5', '縦長'],
+                    ['1:1', '正方形'],
+                    ['3:2', '写真'],
+                    ['9:16', 'ショート'],
+                    ['カスタム', '自由'],
+                  ].map(([ratio, label]) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      onClick={() => setAspectRatio(ratio)}
+                      className={`flex h-11 items-center justify-center gap-2 rounded-md border text-sm font-semibold ${
+                        aspectRatio === ratio
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title={label}
+                    >
+                      <span className="h-4 w-4 rounded-sm border border-current" style={{ aspectRatio: ratio.includes(':') ? ratio.replace(':', ' / ') : '1 / 1' }} />
+                      {ratio}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <SelectLike
+                  label="画像スタイル"
+                  value={imageStyle}
+                  options={['スタイルを選択してください', 'ナチュラル', 'ミニマル', '高級感', 'ファッション', 'シネマティック']}
+                  onChange={setImageStyle}
+                />
+                <SelectLike
+                  label="モデル"
+                  value={model}
+                  options={['Image generation v1', 'Image generation v1 fast', 'Image generation v1 high fidelity']}
+                  onChange={setModel}
+                />
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-900">カラートーン（任意）</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  {[
+                    ['指定なし', '#ffffff'],
+                    ['ブルー', '#194f93'],
+                    ['ブラウン', '#955321'],
+                    ['モノクロ', '#f1f5f9'],
+                  ].map(([label, color]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setColorTone(label)}
+                      className={`flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${
+                        colorTone === label ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <span className="h-6 w-6 rounded-full border border-slate-200" style={{ background: color }} />
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setColorTone('カスタム')}
+                    className={`flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${
+                      colorTone === 'カスタム' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <input
+                      type="color"
+                      value={customColor}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        setCustomColor(event.target.value)
+                        setColorTone('カスタム')
+                      }}
+                      className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+                      aria-label="カスタムカラー"
+                    />
+                    カスタムカラー
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="negative-prompt" className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  ネガティブプロンプト（任意）
+                  <span className="grid h-4 w-4 place-items-center rounded-full border border-slate-300 text-[10px] text-slate-500">i</span>
+                </label>
+                <textarea
+                  id="negative-prompt"
+                  value={negativePrompt}
+                  onChange={(event) => setNegativePrompt(event.target.value)}
+                  className="h-16 w-full resize-none rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-500"
+                  placeholder="含めたくない要素を入力してください（例：ぼやけ、文字、ロゴなど）"
+                />
+              </div>
+
+              {generating && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 px-4 py-3">
+                  <div className="mb-2 flex items-center justify-between text-sm font-semibold text-blue-700">
+                    <span>生成中</span>
+                    <span>{Math.round(progress)}%</span>
+                  </div>
+                  <ProgressBar value={progress} />
+                </div>
+              )}
+
+              {generated && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">生成結果</p>
+                      <p className="text-xs text-slate-500">候補を選択して保存または投稿設定へ進めます。</p>
+                    </div>
+                    <button type="button" onClick={runGenerate} className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
+                      <RefreshCw className="h-4 w-4" />
+                      再生成
+                    </button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {variants.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => {
+                          setVariant(item)
+                          notify(`${item}案を選択しました`)
+                        }}
+                        className={`rounded-md border bg-white p-2 text-left ${variant === item ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}
+                      >
+                        <div className="w-full overflow-hidden rounded-md" style={{ aspectRatio: aspectToCss[aspectRatio] }}>
+                          <CreativeCard variant={item} className="h-full border-0" small={false} />
+                        </div>
+                        <span className="mt-2 block text-xs font-semibold text-slate-600">候補: {item}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    <button type="button" onClick={() => onSave(generatedItem, 'content')} className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700">
+                      <Save className="h-4 w-4" />
+                      コンテンツ一覧へ保存
+                    </button>
+                    <button type="button" onClick={() => onSave(generatedItem, 'publish')} className="h-10 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white">
+                      投稿設定へ
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <TextInput label="保存名" value={title} onChange={setTitle} />
+
               <button
                 type="button"
                 onClick={runGenerate}
                 disabled={generating}
-                className="flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-blue-600 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 <Wand2 className="h-4 w-4" />
-                {generating ? '生成中' : 'AIで生成'}
+                {generating ? '生成中...' : '生成する'}
               </button>
-              <button type="button" onClick={() => setPrompt('自然光、ミニマル、余白を活かした化粧品の広告バナー')} className="h-10 rounded-md border border-slate-200 px-3 text-sm">
-                プロンプト例
-              </button>
-              {generating && <ProgressBar value={progress} />}
             </div>
-          </div>
-
-          <div className="mx-auto grid w-full max-w-[760px] flex-1 place-items-center">
-            <div className="relative w-full max-w-[640px] border border-slate-300 bg-white shadow-sm" style={{ aspectRatio: canvasSize.startsWith('正方形') ? '1 / 1' : '1.62 / 1' }}>
-              <CreativeCard variant={variant} className="h-full rounded-none border-0" editor />
-              {textVisible && (
-                <div className="absolute left-[7%] top-[11%] w-[42%] border border-blue-500 bg-white/10 p-3">
-                  <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-white ring-2 ring-blue-500" />
-                  <div className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-white ring-2 ring-blue-500" />
-                  <div className="absolute -bottom-1 -left-1 h-2 w-2 rounded-full bg-white ring-2 ring-blue-500" />
-                  <div className="absolute -bottom-1 -right-1 h-2 w-2 rounded-full bg-white ring-2 ring-blue-500" />
-                  <p className={`${textBold ? 'font-semibold' : 'font-light'} text-4xl leading-tight`} style={{ color: selectedColor }}>
-                    New<br />Collection<br />2026
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="mx-auto mt-5 flex w-full max-w-[640px] items-center justify-center gap-3">
-            {variants.map((item, index) => (
-              <button
-                key={`${item}-${index}`}
-                type="button"
-                onClick={() => setVariant(item)}
-                className={`h-14 w-20 overflow-hidden rounded-md border bg-white p-1 ${variant === item ? 'border-blue-500' : 'border-slate-200'}`}
-              >
-                <CreativeCard variant={item} small className="h-full border-0" />
-              </button>
-            ))}
-            <button type="button" onClick={runGenerate} className="grid h-14 w-14 place-items-center rounded-md border border-slate-200 bg-white">
-              <Plus className="h-5 w-5 text-slate-500" />
-            </button>
           </div>
         </section>
-
-        <aside className="border-l border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">編集</h2>
-            <button type="button" onClick={() => notify('編集オプションを開きました')} className="grid h-8 w-8 place-items-center rounded-md hover:bg-slate-100">
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="mt-5 space-y-5">
-            <TextInput label="タイトル" value={title} onChange={setTitle} />
-            <ReadOnlyField label="フォント" value="Noto Sans JP" />
-            <div>
-              <p className="mb-2 text-xs font-semibold text-slate-600">スタイル</p>
-              <div className="flex gap-2">
-                {['B', 'I', 'U'].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => {
-                      if (item === 'B') setTextBold((value) => !value)
-                      notify(`${item}スタイルを切り替えました`)
-                    }}
-                    className={`grid h-8 w-8 place-items-center rounded-md border text-sm font-semibold ${
-                      item === 'B' && textBold ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200'
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="mb-2 text-xs font-semibold text-slate-600">色</p>
-              <div className="flex gap-2">
-                {['#232322', '#0a7cff', '#8c4d22', '#ffffff'].map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setSelectedColor(color)}
-                    className={`h-7 w-7 rounded-full border ${selectedColor === color ? 'ring-2 ring-blue-500' : ''}`}
-                    style={{ background: color }}
-                    aria-label={color}
-                  />
-                ))}
-              </div>
-            </div>
-            <ReadOnlyField label="モデル" value="Image generation v1" />
-            <ReadOnlyField label="透明度" value="100%" />
-            <button
-              type="button"
-              onClick={() => setTextVisible((value) => !value)}
-              className="h-10 w-full rounded-md border border-slate-200 text-sm font-semibold"
-            >
-              {textVisible ? 'テキストを非表示' : 'テキストを表示'}
-            </button>
-            <button
-              type="button"
-              onClick={() => onSave(generatedItem, 'publish')}
-              className="h-10 w-full rounded-md bg-blue-600 text-sm font-semibold text-white"
-            >
-              投稿設定へ
-            </button>
-          </div>
-        </aside>
       </div>
     </div>
   )

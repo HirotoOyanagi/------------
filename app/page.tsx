@@ -28,13 +28,9 @@ import {
   Maximize2,
   Menu,
   MessageCircle,
-  Mic,
   MoreHorizontal,
-  Music,
   Palette,
-  Pause,
   PenLine,
-  Play,
   Plus,
   RefreshCw,
   Repeat2,
@@ -1649,28 +1645,34 @@ function VideoEditorView({
   notify: Notify
   onJobNotice: PushNotification
 }) {
-  const [prompt, setPrompt] = useState('商品ボトルを自然光で見せる15秒のSNS広告動画。ゆっくりズームし、最後にCTAを表示')
-  const [title, setTitle] = useState('AI生成PR動画')
-  const [variant, setVariant] = useState<CreativeVariant>('natural')
   const [activeTool, setActiveTool] = useState('AI生成')
-  const [playing, setPlaying] = useState(false)
+  const [title, setTitle] = useState('AI生成PR動画')
+  const [uploadedName, setUploadedName] = useState('')
+  const [referenceImageDataUrl, setReferenceImageDataUrl] = useState('')
+  const [prompt, setPrompt] = useState('商品ボトルを自然光で見せる15秒のSNS広告動画。ゆっくりズームし、最後にCTAを表示')
   const [duration, setDuration] = useState('15秒')
   const [aspect, setAspect] = useState('16:9')
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const [variant, setVariant] = useState<CreativeVariant>('natural')
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [selectedColor, setSelectedColor] = useState('#ffffff')
+  const [generated, setGenerated] = useState(false)
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState('')
   const [generatedVideoUrls, setGeneratedVideoUrls] = useState<string[]>([])
   const [currentVideoJobId, setCurrentVideoJobId] = useState('')
-  const clips = ['00:00', '00:03', '00:06', '00:09', '00:12']
+
+  const aspectToCss: Record<string, string> = {
+    '16:9': '16 / 9',
+    '9:16': '9 / 16',
+    '1:1': '1 / 1',
+  }
 
   const generatedItem: ContentItem = {
     id: currentVideoJobId || `asset-video-${title.replace(/\s/g, '-')}`,
     title,
     type: '動画',
     date: today,
-    status: '下書き',
+    status: generated ? '下書き' : '生成中',
     creative: variant,
     source: 'AI動画',
     prompt,
@@ -1681,6 +1683,10 @@ function VideoEditorView({
   const runGenerate = () => {
     if (!prompt.trim()) {
       notify('動画プロンプトを入力してください')
+      return
+    }
+    if (!referenceImageDataUrl) {
+      notify('動画生成には参照画像が必要です')
       return
     }
 
@@ -1698,6 +1704,7 @@ function VideoEditorView({
     }
 
     setCurrentVideoJobId(jobId)
+    setGenerated(false)
     setGeneratedVideoUrl('')
     setGeneratedVideoUrls([])
     setGenerating(true)
@@ -1714,14 +1721,15 @@ function VideoEditorView({
     ;(async () => {
       try {
         const durationSeconds = Number(duration.replace('秒', ''))
+        const selectedDuration = [5, 10, 15].includes(durationSeconds) ? durationSeconds : 15
         const response = await fetch('/api/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt,
-            image_urls: [],
+            image_urls: [referenceImageDataUrl],
             resolution: '720p',
-            duration: Number.isFinite(durationSeconds) ? durationSeconds : 'auto',
+            duration: selectedDuration,
             aspect_ratio: aspect,
             generate_audio: audioEnabled,
           }),
@@ -1739,6 +1747,7 @@ function VideoEditorView({
         setGeneratedVideoUrl(urls[0] ?? '')
         setVariant(nextVariant)
         setProgress(100)
+        setGenerated(true)
         onSave({
           ...baseItem,
           status: '下書き',
@@ -1768,206 +1777,325 @@ function VideoEditorView({
   }
 
   return (
-    <div className="min-h-screen bg-[#181a20] text-white">
-      <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-md hover:bg-white/10">
-            <ArrowLeft className="h-4 w-4" />
+    <div className="min-h-screen bg-[#f6f8fb]">
+      <div className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-5">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-md hover:bg-slate-100" aria-label="戻る">
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            className="h-9 rounded-md border border-white/10 bg-white/5 px-3 text-sm font-semibold outline-none"
-          />
+          <h1 className="text-xl font-semibold text-slate-950">AI動画生成</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => onSave(generatedItem, 'content')}
-            className="flex items-center gap-2 rounded-md bg-white/10 px-4 py-2 text-sm"
+            className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
           >
             <Save className="h-4 w-4" />
-            自動保存
+            保存
           </button>
           <button
             type="button"
             onClick={() => {
-              downloadTextFile(`${title}.txt`, `AI video prompt:\n${prompt}\n\n${aspect} / ${duration} / audio: ${audioEnabled}`)
-              notify('動画生成データをエクスポートしました')
+              downloadTextFile(`${title}.txt`, `AI video prompt:\n${prompt}\n\nreference image: ${uploadedName || 'なし'}\naspect: ${aspect}\nduration: ${duration}\naudio: ${audioEnabled ? 'あり' : 'なし'}`)
+              notify('動画生成データをダウンロードしました')
             }}
-            className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold"
+            className="flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
           >
-            <Upload className="h-4 w-4" />
-            エクスポート
+            <Download className="h-4 w-4" />
+            ダウンロード
           </button>
         </div>
       </div>
 
-      <div className="grid min-h-[calc(100vh-56px)] grid-cols-1 lg:grid-cols-[86px_minmax(0,1fr)_300px]">
-        <aside className="border-r border-white/10 p-2">
+      <div className="grid min-h-[calc(100vh-64px)] grid-cols-1 lg:grid-cols-[172px_minmax(0,1fr)]">
+        <aside className="border-r border-slate-200 bg-white p-3">
           {[
             [Sparkles, 'AI生成'],
             [Video, 'メディア'],
             [Type, 'テキスト'],
-            [SlidersHorizontal, 'エフェクト'],
             [Shapes, '図形'],
-            [Layers, '素材'],
-            [Music, '音楽'],
-            [Mic, '録音'],
+            [Upload, 'アップロード'],
+            [Palette, '背景'],
+            [Layers, 'ブランドキット'],
           ].map(([Icon, label]) => {
             const ToolIcon = Icon as LucideIcon
+            const active = activeTool === label
             return (
               <button
                 key={label as string}
                 type="button"
                 onClick={() => {
                   setActiveTool(label as string)
-                  if (label !== 'AI生成') notify(`${label as string}パネルを開きました`)
+                  if (label !== 'AI生成') notify(`${label as string}パネルを開きました。AI生成フォームは保持されています`)
                 }}
-                className={`mb-2 grid h-14 w-full place-items-center rounded-md text-xs ${
-                  activeTool === label ? 'bg-white/15 text-white' : 'text-slate-300 hover:bg-white/10'
+                className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm ${
+                  active ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <ToolIcon className="h-4 w-4" />
-                <span>{label as string}</span>
+                {label as string}
               </button>
             )
           })}
         </aside>
 
-        <section className="flex flex-col p-5">
-          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-4">
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                className="h-24 resize-none rounded-md border border-white/10 bg-black/20 p-3 text-sm outline-none"
-              />
-              <div className="grid gap-2">
-                <SegmentedControl value={aspect} options={['16:9', '9:16', '1:1']} onChange={setAspect} dark />
-                <SegmentedControl value={duration} options={['8秒', '15秒', '30秒']} onChange={setDuration} dark />
-                <button
-                  type="button"
-                  onClick={() => setAudioEnabled((value) => !value)}
-                  className={`h-9 rounded-md text-sm font-semibold ${audioEnabled ? 'bg-blue-600 text-white' : 'bg-white/10 text-slate-300'}`}
-                >
-                  AI音楽 {audioEnabled ? 'あり' : 'なし'}
-                </button>
-              </div>
+        <section className="bg-[#f6f8fb] p-4 md:p-6">
+          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">AI動画生成</h2>
+              <p className="mt-1 text-sm text-slate-500">参照画像をもとに、動画の生成に必要な設定を行ってください。</p>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+
+            <div className="mt-7 space-y-5">
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="block text-sm font-semibold text-slate-900">画像の入力（必須）</span>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    referenceImageDataUrl ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                  }`}>
+                    {referenceImageDataUrl ? '参照画像あり' : '必須'}
+                  </span>
+                </div>
+                <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center transition hover:border-blue-300 hover:bg-blue-50/20">
+                  <input
+                    id="ai-video-upload"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (!file) return
+                      setUploadedName(file.name)
+                      const reader = new FileReader()
+                      reader.onload = () => {
+                        setReferenceImageDataUrl(typeof reader.result === 'string' ? reader.result : '')
+                        notify(`${file.name}を動画生成の参照画像として設定しました`)
+                      }
+                      reader.readAsDataURL(file)
+                    }}
+                  />
+                  <label htmlFor="ai-video-upload" className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+                    <Upload className="h-4 w-4" />
+                    {referenceImageDataUrl ? '別の画像を選択' : '画像をアップロード'}
+                  </label>
+                  {referenceImageDataUrl && (
+                    <div className="mx-auto mt-4 grid max-w-2xl gap-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-left sm:grid-cols-[160px_minmax(0,1fr)]">
+                      <ExpandableMedia
+                        src={referenceImageDataUrl}
+                        title={uploadedName || '参照画像プレビュー'}
+                        type="画像"
+                        className="aspect-[16/10] rounded-md"
+                      />
+                      <div className="flex min-w-0 flex-col justify-center">
+                        <p className="text-xs font-semibold text-slate-500">MCPへ渡す参照画像</p>
+                        <p className="mt-1 truncate text-sm font-semibold text-slate-900">{uploadedName}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          生成時はこの画像を `image_urls` として動画生成MCPに渡します。
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadedName('')
+                            setReferenceImageDataUrl('')
+                            notify('動画生成の参照画像を削除しました')
+                          }}
+                          className="mt-3 inline-flex h-8 w-fit items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          参照画像を削除
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <p className="mt-3 text-sm font-medium text-slate-500">
+                    {uploadedName || '動画生成には参照画像が必要です'}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-slate-400">対応形式：JPG / PNG / WEBP（最大10MB）</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label htmlFor="ai-video-prompt" className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    プロンプト
+                    <span className="grid h-4 w-4 place-items-center rounded-full border border-slate-300 text-[10px] text-slate-500">i</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPrompt('3シーン構成。商品クローズアップ、利用シーン、CTAの順に自然光で表現')}
+                    className="rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    プロンプト例を使う
+                  </button>
+                </div>
+                <textarea
+                  id="ai-video-prompt"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  className="h-24 w-full resize-none rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-500"
+                  placeholder="生成したい動画の内容を詳しく入力してください"
+                />
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-900">アスペクト比（横:縦）</p>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {[
+                    ['16:9', '横長'],
+                    ['9:16', 'ショート'],
+                    ['1:1', '正方形'],
+                  ].map(([ratio, label]) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      onClick={() => setAspect(ratio)}
+                      className={`flex h-11 items-center justify-center gap-2 rounded-md border text-sm font-semibold ${
+                        aspect === ratio
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title={label}
+                    >
+                      <span className="h-4 w-4 rounded-sm border border-current" style={{ aspectRatio: ratio.replace(':', ' / ') }} />
+                      {ratio}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-slate-900">動画の長さ（最大15秒）</p>
+                  <div className="grid grid-cols-3 gap-2 rounded-md bg-slate-100 p-1">
+                    {['5秒', '10秒', '15秒'].map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setDuration(option)}
+                        className={`h-9 rounded text-sm font-semibold ${
+                          duration === option ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/60'
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-slate-900">音声</p>
+                  <div className="grid grid-cols-2 gap-2 rounded-md bg-slate-100 p-1">
+                    {[
+                      ['あり', true],
+                      ['なし', false],
+                    ].map(([label, value]) => (
+                      <button
+                        key={label as string}
+                        type="button"
+                        onClick={() => setAudioEnabled(value as boolean)}
+                        className={`h-9 rounded text-sm font-semibold ${
+                          audioEnabled === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/60'
+                        }`}
+                      >
+                        音声{label as string}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {generating && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 px-4 py-3">
+                  <div className="mb-2 flex items-center justify-between text-sm font-semibold text-blue-700">
+                    <span>生成中</span>
+                    <span>{Math.round(progress)}%</span>
+                  </div>
+                  <ProgressBar value={progress} />
+                </div>
+              )}
+
+              {generated && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">生成結果</p>
+                      <p className="text-xs text-slate-500">候補を選択して保存または投稿設定へ進めます。</p>
+                    </div>
+                    <button type="button" onClick={runGenerate} className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
+                      <RefreshCw className="h-4 w-4" />
+                      再生成
+                    </button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {generatedVideoUrls.map((url, index) => {
+                      const selected = generatedVideoUrl === url
+                      return (
+                        <div
+                          key={url}
+                          className={`rounded-md border bg-white p-2 text-left ${
+                            selected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+                          }`}
+                        >
+                          <div className="w-full overflow-hidden rounded-md" style={{ aspectRatio: aspectToCss[aspect] }}>
+                            <ExpandableMedia
+                              src={url}
+                              title={`生成動画 ${index + 1}`}
+                              type="動画"
+                              className="h-full w-full rounded-md border-0 bg-black"
+                            />
+                          </div>
+                          <span className="mt-2 block text-xs font-semibold text-slate-600">
+                            生成動画 {index + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGeneratedVideoUrl(url)
+                              notify(`生成動画 ${index + 1} を保存対象にしました`)
+                            }}
+                            className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                              selected ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {selected ? '保存対象' : '保存対象にする'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {generatedVideoUrl && (
+                    <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                      <span className="font-semibold text-slate-700">保存URL:</span>{' '}
+                      <span className="break-all">{generatedVideoUrl}</span>
+                    </div>
+                  )}
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    <button type="button" onClick={() => onSave(generatedItem, 'content')} className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700">
+                      <Save className="h-4 w-4" />
+                      コンテンツ一覧へ保存
+                    </button>
+                    <button type="button" onClick={() => onSave(generatedItem, 'publish')} className="h-10 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white">
+                      投稿設定へ
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <TextInput label="保存名" value={title} onChange={setTitle} />
+
               <button
                 type="button"
                 onClick={runGenerate}
                 disabled={generating}
-                className="flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-semibold disabled:opacity-50"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-blue-600 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 <Wand2 className="h-4 w-4" />
-                {generating ? '生成中' : 'AIで動画生成'}
+                {generating ? '生成中...' : '生成する'}
               </button>
-              <button type="button" onClick={() => setPrompt('3シーン構成。商品クローズアップ、利用シーン、CTAの順に自然光で表現')} className="h-10 rounded-md border border-white/10 px-3 text-sm">
-                プロンプト例
-              </button>
-              {generating && <ProgressBar value={progress} dark />}
-            </div>
-          </div>
-
-          <div className="grid flex-1 place-items-center">
-            <div className="relative w-full max-w-[760px] overflow-hidden rounded-lg bg-slate-900 shadow-2xl" style={{ aspectRatio: aspect === '9:16' ? '9 / 16' : aspect === '1:1' ? '1 / 1' : '16 / 9' }}>
-              {generatedVideoUrl ? (
-                <ExpandableMedia
-                  src={generatedVideoUrl}
-                  title={title}
-                  type="動画"
-                  className="h-full w-full rounded-none border-0 bg-black"
-                />
-              ) : (
-                <>
-                  <CreativeCard variant={variant} className="h-full rounded-none border-0" editor />
-                  <div className="absolute right-[16%] top-[18%] w-[30%] border border-blue-400 p-3">
-                    <p className="text-5xl font-light leading-tight" style={{ color: selectedColor }}>New<br />Lifestyle</p>
-                    <p className="mt-3 text-sm text-white/80">毎日に、やさしさを。</p>
-                  </div>
-                </>
-              )}
-              <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-4 rounded-full bg-black/40 px-5 py-2">
-                <button type="button" onClick={() => setPlaying(false)} className="grid h-7 w-7 place-items-center rounded-full hover:bg-white/10">
-                  <Pause className="h-4 w-4" />
-                </button>
-                <button type="button" onClick={() => setPlaying(true)} className="grid h-7 w-7 place-items-center rounded-full hover:bg-white/10">
-                  <Play className="h-4 w-4" />
-                </button>
-                <span className="text-xs">{playing ? '再生中' : '停止中'} / {duration}</span>
-              </div>
-            </div>
-            {generatedVideoUrl && (
-              <div className="mt-3 max-w-[760px] rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
-                <span className="font-semibold text-white">保存URL:</span>{' '}
-                <span className="break-all">{generatedVideoUrl}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-3">
-            <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
-              <span>AI生成タイムライン</span>
-              <span>{duration}</span>
-            </div>
-            <div className="relative h-28">
-              <div className="grid h-20 grid-cols-5 gap-2">
-                {clips.map((clip, index) => (
-                  <button
-                    key={clip}
-                    type="button"
-                    onClick={() => {
-                      setVariant(index % 2 === 0 ? 'natural' : 'fashion')
-                      notify(`${clip} のクリップを選択しました`)
-                    }}
-                    className="overflow-hidden rounded-md border border-white/10 bg-white/5 text-left"
-                  >
-                    <CreativeCard variant={index % 2 === 0 ? 'natural' : 'fashion'} small className="h-full border-0" />
-                    <span className="absolute mt-1 text-[10px] text-slate-400">{clip}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 h-4 rounded-full bg-violet-500/70" />
-              <div className="absolute left-[50%] top-0 h-full w-0.5 bg-blue-400" />
             </div>
           </div>
         </section>
-
-        <aside className="border-l border-white/10 p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">AI動画設定</h2>
-            <button type="button" onClick={() => notify('動画設定メニューを開きました')} className="grid h-8 w-8 place-items-center rounded-md hover:bg-white/10">
-              <MoreHorizontal className="h-4 w-4 text-slate-400" />
-            </button>
-          </div>
-          <ReadOnlyField label="モデル" value="Video generation v1" dark />
-          <ReadOnlyField label="構成" value="3シーン + CTA" dark />
-          <div className="mt-5">
-            <p className="mb-2 text-xs text-slate-400">テキストカラー</p>
-            <div className="flex gap-2">
-              {['#ffffff', '#111827', '#d8c7ae', '#0a7cff'].map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setSelectedColor(color)}
-                  className={`h-7 w-7 rounded-full border border-white/20 ${selectedColor === color ? 'ring-2 ring-blue-400' : ''}`}
-                  style={{ background: color }}
-                  aria-label={color}
-                />
-              ))}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => onSave(generatedItem, 'publish')}
-            className="mt-6 h-10 w-full rounded-md bg-blue-600 text-sm font-semibold text-white"
-          >
-            投稿設定へ
-          </button>
-        </aside>
       </div>
     </div>
   )

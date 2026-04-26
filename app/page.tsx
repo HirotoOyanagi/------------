@@ -1176,8 +1176,15 @@ function ImageEditorView({
 
             <div className="mt-7 space-y-5">
               <div>
-                <span className="mb-2 block text-sm font-semibold text-slate-900">画像の入力（任意）</span>
-                <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-7 text-center transition hover:border-blue-300 hover:bg-blue-50/20">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="block text-sm font-semibold text-slate-900">画像の入力（任意）</span>
+                  {referenceImageDataUrl && (
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                      参照画像あり
+                    </span>
+                  )}
+                </div>
+                <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-5 text-center transition hover:border-blue-300 hover:bg-blue-50/20">
                   <input
                     id="ai-image-upload"
                     type="file"
@@ -1197,8 +1204,34 @@ function ImageEditorView({
                   />
                   <label htmlFor="ai-image-upload" className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
                     <Upload className="h-4 w-4" />
-                    画像をアップロード
+                    {referenceImageDataUrl ? '別の画像を選択' : '画像をアップロード'}
                   </label>
+                  {referenceImageDataUrl && (
+                    <div className="mx-auto mt-4 grid max-w-2xl gap-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-left sm:grid-cols-[160px_minmax(0,1fr)]">
+                      <div className="overflow-hidden rounded-md border border-slate-200 bg-white" style={{ aspectRatio: '16 / 10' }}>
+                        <img src={referenceImageDataUrl} alt="参照画像プレビュー" className="h-full w-full object-cover" />
+                      </div>
+                      <div className="flex min-w-0 flex-col justify-center">
+                        <p className="text-xs font-semibold text-slate-500">MCPへ渡す参照画像</p>
+                        <p className="mt-1 truncate text-sm font-semibold text-slate-900">{uploadedName}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          生成時はこの画像を `image_urls` として画像編集MCPに渡します。
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadedName('')
+                            setReferenceImageDataUrl('')
+                            notify('参照画像を削除しました')
+                          }}
+                          className="mt-3 inline-flex h-8 w-fit items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          参照画像を削除
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <p className="mt-3 text-sm font-medium text-slate-500">
                     {uploadedName || '画像をドラッグ＆ドロップ、またはクリックして選択'}
                   </p>

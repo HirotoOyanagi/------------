@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -25,6 +25,7 @@ import {
   Link,
   Lock,
   Mail,
+  Maximize2,
   Menu,
   MessageCircle,
   Mic,
@@ -39,12 +40,10 @@ import {
   Repeat2,
   Save,
   Search,
-  Settings,
   Shapes,
   SlidersHorizontal,
   Smile,
   Sparkles,
-  Target,
   TrendingUp,
   Trash2,
   Type,
@@ -72,7 +71,7 @@ type View =
 
 type CreativeVariant = 'natural' | 'fashion' | 'travel'
 type ContentType = '画像' | '動画'
-type ContentStatus = '公開済み' | '下書き' | '生成中'
+type ContentStatus = '公開済み' | '下書き' | '生成中' | '失敗'
 type Notify = (message: string) => void
 
 type NavItem = {
@@ -108,6 +107,11 @@ type ContentItem = {
   creative: CreativeVariant
   source: 'AI画像' | 'AI動画' | 'アップロード' | 'テンプレート'
   prompt?: string
+  mediaUrl?: string
+  mediaUrls?: string[]
+  progress?: number
+  errorMessage?: string
+  completedAt?: string
 }
 
 type ToastState = {
@@ -115,7 +119,17 @@ type ToastState = {
   message: string
 } | null
 
-const today = '2026/04/25'
+type AppNotification = {
+  id: string
+  title: string
+  detail: string
+  time: string
+  kind: 'info' | 'success' | 'error'
+}
+
+type PushNotification = (title: string, detail?: string, kind?: AppNotification['kind']) => void
+
+const today = '2026/04/26'
 
 const navItems: NavItem[] = [
   { key: 'home', label: 'ホーム', icon: HomeIcon, view: 'timeline' },
@@ -178,6 +192,12 @@ const initialContentItems: ContentItem[] = [
   { id: 'asset-5', title: 'GWキャンペーンバナー', type: '画像', date: '2026/04/05', status: '公開済み', creative: 'travel', source: 'アップロード' },
 ]
 
+const initialNotifications: AppNotification[] = [
+  { id: 'notice-like', title: 'Brand Officialがあなたの投稿をいいねしました', detail: 'ホーム投稿へのリアクション', time: '2分前', kind: 'info' },
+  { id: 'notice-follow', title: 'Design Lifeがあなたをフォローしました', detail: '@design_life', time: '18分前', kind: 'info' },
+  { id: 'notice-video', title: 'AI動画の生成が完了しました', detail: 'ブランド紹介動画を保存済み', time: '1時間前', kind: 'success' },
+]
+
 const trends = [
   ['#週末の過ごし方', '12,345 posts'],
   ['#新商品', '8,765 posts'],
@@ -206,25 +226,21 @@ function chooseVariantFromPrompt(prompt: string, fallback: CreativeVariant): Cre
   return fallback
 }
 
-function startMockAiJob(
+function startEstimatedProgress(
   setProgress: (value: number) => void,
-  setRunning: (value: boolean) => void,
-  onComplete: () => void
+  onTick?: (value: number) => void
 ) {
-  setRunning(true)
-  setProgress(6)
-  let next = 6
+  let progress = 8
+  setProgress(progress)
+  onTick?.(progress)
+
   const timer = window.setInterval(() => {
-    next = Math.min(next + 13, 100)
-    setProgress(next)
-    if (next >= 100) {
-      window.clearInterval(timer)
-      window.setTimeout(() => {
-        setRunning(false)
-        onComplete()
-      }, 240)
-    }
-  }, 220)
+    progress = Math.min(progress + (progress < 50 ? 6 : progress < 80 ? 3 : 1), 92)
+    setProgress(progress)
+    onTick?.(progress)
+  }, 900)
+
+  return () => window.clearInterval(timer)
 }
 
 function downloadTextFile(filename: string, content: string) {
@@ -237,6 +253,30 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
+function extractAssetUrls(data: unknown): string[] {
+  const urls: string[] = []
+
+  const visit = (value: unknown) => {
+    if (!value) return
+    if (typeof value === 'string') {
+      if (/^https?:\/\//.test(value) || value.startsWith('data:image/') || value.startsWith('blob:')) {
+        urls.push(value)
+      }
+      return
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+    if (typeof value === 'object') {
+      Object.values(value as Record<string, unknown>).forEach(visit)
+    }
+  }
+
+  visit(data)
+  return Array.from(new Set(urls))
+}
+
 export default function Home() {
   const [isSignedIn, setIsSignedIn] = useState(false)
   const [view, setView] = useState<View>('timeline')
@@ -244,9 +284,31 @@ export default function Home() {
   const [contentItems, setContentItems] = useState<ContentItem[]>(initialContentItems)
   const [selectedPost, setSelectedPost] = useState<Post>(initialPosts[1])
   const [publishItem, setPublishItem] = useState<ContentItem>(initialContentItems[1])
+  const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications)
   const [toast, setToast] = useState<ToastState>(null)
 
   const notify: Notify = (message) => setToast({ id: Date.now(), message })
+  const pushNotification: PushNotification = (title, detail = '', kind = 'info') => {
+    setNotifications((current) => [
+      { id: idFrom('notice'), title, detail, time: 'たった今', kind },
+      ...current,
+    ].slice(0, 30))
+  }
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem('reelify.contentItems')
+    if (!raw) return
+    try {
+      const saved = JSON.parse(raw) as ContentItem[]
+      if (Array.isArray(saved) && saved.length > 0) setContentItems(saved)
+    } catch {
+      window.localStorage.removeItem('reelify.contentItems')
+    }
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('reelify.contentItems', JSON.stringify(contentItems))
+  }, [contentItems])
 
   useEffect(() => {
     if (!toast) return
@@ -277,7 +339,11 @@ export default function Home() {
     setView('timeline')
   }
 
-  const saveContent = (item: ContentItem, next: 'stay' | 'content' | 'publish' = 'stay') => {
+  const saveContent = (
+    item: ContentItem,
+    next: 'stay' | 'content' | 'publish' = 'stay',
+    silent = false
+  ) => {
     setContentItems((current) => {
       const exists = current.some((content) => content.id === item.id)
       return exists
@@ -285,7 +351,9 @@ export default function Home() {
         : [item, ...current]
     })
     setPublishItem(item)
-    notify(`${item.title}を保存しました`)
+    if (!silent) {
+      notify(item.mediaUrl ? `${item.title}のURLを保存しました` : `${item.title}を保存しました`)
+    }
     if (next === 'content') setView('content')
     if (next === 'publish') setView('publish')
   }
@@ -312,9 +380,9 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-slate-950">
-      <MobileHeader currentView={view} onNavigate={setView} />
+      <MobileHeader currentView={view} onNavigate={setView} notificationCount={notifications.length} />
       <div className="mx-auto grid min-h-screen w-full max-w-[1440px] md:grid-cols-[224px_minmax(0,1fr)]">
-        <Sidebar currentView={view} onNavigate={setView} notify={notify} />
+        <Sidebar currentView={view} onNavigate={setView} notify={notify} notificationCount={notifications.length} />
         <main className="min-w-0 border-x border-slate-200 bg-white/70">
           {view === 'timeline' && (
             <TimelineView
@@ -327,7 +395,16 @@ export default function Home() {
             />
           )}
           {view === 'search' && <SearchView notify={notify} />}
-          {view === 'notifications' && <NotificationsView notify={notify} />}
+          {view === 'notifications' && (
+            <NotificationsView
+              notify={notify}
+              items={notifications}
+              onClear={() => {
+                setNotifications([])
+                notify('通知をすべて既読にしました')
+              }}
+            />
+          )}
           {view === 'messages' && <MessagesView notify={notify} />}
           {view === 'bookmarks' && <BookmarksView posts={posts} onOpenPost={openPost} notify={notify} />}
           {view === 'post' && (
@@ -344,15 +421,17 @@ export default function Home() {
           {view === 'image' && (
             <ImageEditorView
               onBack={() => setView('compose')}
-              onSave={(item, next) => saveContent(item, next)}
+              onSave={(item, next, silent) => saveContent(item, next, silent)}
               notify={notify}
+              onJobNotice={pushNotification}
             />
           )}
           {view === 'video' && (
             <VideoEditorView
               onBack={() => setView('compose')}
-              onSave={(item, next) => saveContent(item, next)}
+              onSave={(item, next, silent) => saveContent(item, next, silent)}
               notify={notify}
+              onJobNotice={pushNotification}
             />
           )}
           {view === 'analytics' && <AnalyticsView notify={notify} />}
@@ -456,9 +535,11 @@ function AuthGate({ onSignIn, notify }: { onSignIn: () => void; notify: Notify }
 function MobileHeader({
   currentView,
   onNavigate,
+  notificationCount,
 }: {
   currentView: View
   onNavigate: (view: View) => void
+  notificationCount: number
 }) {
   const [open, setOpen] = useState(false)
   const activeKey = activeKeyByView[currentView]
@@ -501,7 +582,12 @@ function MobileHeader({
                 }`}
               >
                 <Icon className="h-4 w-4" />
-                {item.label}
+                <span className="min-w-0 flex-1">{item.label}</span>
+                {item.key === 'notice' && notificationCount > 0 && (
+                  <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    {Math.min(notificationCount, 99)}
+                  </span>
+                )}
               </button>
             )
           })}
@@ -515,10 +601,12 @@ function Sidebar({
   currentView,
   onNavigate,
   notify,
+  notificationCount,
 }: {
   currentView: View
   onNavigate: (view: View) => void
   notify: Notify
+  notificationCount: number
 }) {
   const activeKey = activeKeyByView[currentView]
 
@@ -544,6 +632,11 @@ function Sidebar({
             >
               <Icon className="h-4 w-4" />
               <span className="min-w-0 truncate">{item.label}</span>
+              {item.key === 'notice' && notificationCount > 0 && (
+                <span className="ml-auto rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                  {Math.min(notificationCount, 99)}
+                </span>
+              )}
             </button>
           )
         })}
@@ -1021,10 +1114,12 @@ function ImageEditorView({
   onBack,
   onSave,
   notify,
+  onJobNotice,
 }: {
   onBack: () => void
-  onSave: (item: ContentItem, next?: 'stay' | 'content' | 'publish') => void
+  onSave: (item: ContentItem, next?: 'stay' | 'content' | 'publish', silent?: boolean) => void
   notify: Notify
+  onJobNotice: PushNotification
 }) {
   const [activeTool, setActiveTool] = useState('AI生成')
   const [title, setTitle] = useState('AI生成画像')
@@ -1043,6 +1138,8 @@ function ImageEditorView({
   const [progress, setProgress] = useState(0)
   const [generated, setGenerated] = useState(false)
   const [generatedImageUrls, setGeneratedImageUrls] = useState<string[]>([])
+  const [selectedGeneratedImageUrl, setSelectedGeneratedImageUrl] = useState('')
+  const [currentImageJobId, setCurrentImageJobId] = useState('')
 
   const aspectToCss: Record<string, string> = {
     '16:9': '16 / 9',
@@ -1054,7 +1151,7 @@ function ImageEditorView({
   }
 
   const generatedItem: ContentItem = {
-    id: `asset-image-${title.replace(/\s/g, '-')}`,
+    id: currentImageJobId || `asset-image-${title.replace(/\s/g, '-')}`,
     title,
     type: '画像',
     date: today,
@@ -1062,6 +1159,8 @@ function ImageEditorView({
     creative: variant,
     source: 'AI画像',
     prompt,
+    mediaUrl: selectedGeneratedImageUrl || generatedImageUrls[0],
+    mediaUrls: generatedImageUrls,
   }
 
   const runGenerate = () => {
@@ -1069,9 +1168,35 @@ function ImageEditorView({
       notify('プロンプトを入力してください')
       return
     }
+    const jobId = idFrom('asset-image-job')
+    setCurrentImageJobId(jobId)
+    const baseItem: ContentItem = {
+      id: jobId,
+      title,
+      type: '画像',
+      date: today,
+      status: '生成中',
+      creative: variant,
+      source: 'AI画像',
+      prompt,
+      progress: 8,
+    }
+
     setGenerated(false)
     setGeneratedImageUrls([])
-    startMockAiJob(setProgress, setGenerating, async () => {
+    setSelectedGeneratedImageUrl('')
+    setGenerating(true)
+    onSave(baseItem, 'stay', true)
+    notify('画像生成ジョブを開始しました。完了したら通知します')
+    onJobNotice('画像生成を開始しました', title, 'info')
+
+    let latestProgress = 8
+    const stopProgress = startEstimatedProgress(setProgress, (value) => {
+      latestProgress = value
+      onSave({ ...baseItem, progress: value }, 'stay', true)
+    })
+
+    ;(async () => {
       let nextVariant = chooseVariantFromPrompt(prompt, variant)
       try {
         const response = await fetch('/api/generate-image', {
@@ -1088,18 +1213,48 @@ function ImageEditorView({
           }),
         })
         const data = await response.json()
-        nextVariant = data?.candidates?.[0]?.variant ?? nextVariant
-        if (Array.isArray(data?.imageUrls)) {
-          setGeneratedImageUrls(data.imageUrls.filter((url: unknown): url is string => typeof url === 'string'))
+        if (!response.ok || data?.success === false) {
+          throw new Error(data?.message ?? '画像生成に失敗しました')
         }
-      } catch {
-        notify('API応答がないため、ローカルプレビューで生成しました')
+        nextVariant = data?.candidates?.[0]?.variant ?? nextVariant
+        const urls = Array.isArray(data?.imageUrls)
+          ? data.imageUrls.filter((url: unknown): url is string => typeof url === 'string')
+          : []
+        if (urls.length === 0) {
+          throw new Error('生成結果の画像URLを取得できませんでした')
+        }
+        setGeneratedImageUrls(urls)
+        setSelectedGeneratedImageUrl(urls[0] ?? '')
+        setProgress(100)
+        setVariant(nextVariant)
+        setVariants([nextVariant, ...(['fashion', 'natural', 'travel'] as CreativeVariant[]).filter((item) => item !== nextVariant)])
+        setGenerated(true)
+        onSave({
+          ...baseItem,
+          status: '下書き',
+          creative: nextVariant,
+          mediaUrl: urls[0],
+          mediaUrls: urls,
+          progress: 100,
+          completedAt: new Date().toISOString(),
+        }, 'stay', true)
+        notify('画像生成が完了しました。コンテンツ一覧から投稿に使えます')
+        onJobNotice('画像生成が完了しました', `${title}をコンテンツ一覧に保存しました`, 'success')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '画像生成に失敗しました'
+        onSave({
+          ...baseItem,
+          status: '失敗',
+          progress: latestProgress,
+          errorMessage: message,
+        }, 'stay', true)
+        notify(message)
+        onJobNotice('画像生成に失敗しました', message, 'error')
+      } finally {
+        stopProgress()
+        setGenerating(false)
       }
-      setVariant(nextVariant)
-      setVariants([nextVariant, ...(['fashion', 'natural', 'travel'] as CreativeVariant[]).filter((item) => item !== nextVariant)])
-      setGenerated(true)
-      notify('AI画像を生成しました')
-    })
+    })()
   }
 
   return (
@@ -1208,9 +1363,12 @@ function ImageEditorView({
                   </label>
                   {referenceImageDataUrl && (
                     <div className="mx-auto mt-4 grid max-w-2xl gap-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-left sm:grid-cols-[160px_minmax(0,1fr)]">
-                      <div className="overflow-hidden rounded-md border border-slate-200 bg-white" style={{ aspectRatio: '16 / 10' }}>
-                        <img src={referenceImageDataUrl} alt="参照画像プレビュー" className="h-full w-full object-cover" />
-                      </div>
+                      <ExpandableMedia
+                        src={referenceImageDataUrl}
+                        title={uploadedName || '参照画像プレビュー'}
+                        type="画像"
+                        className="aspect-[16/10] rounded-md"
+                      />
                       <div className="flex min-w-0 flex-col justify-center">
                         <p className="text-xs font-semibold text-slate-500">MCPへ渡す参照画像</p>
                         <p className="mt-1 truncate text-sm font-semibold text-slate-900">{uploadedName}</p>
@@ -1387,35 +1545,68 @@ function ImageEditorView({
                     </button>
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    {(generatedImageUrls.length > 0 ? generatedImageUrls : variants).map((item, index) => (
-                      <button
-                        key={typeof item === 'string' ? item : index}
-                        type="button"
-                        onClick={() => {
-                          if (generatedImageUrls.length > 0) {
-                            notify(`生成画像 ${index + 1} を選択しました`)
-                            return
-                          }
-                          setVariant(item as CreativeVariant)
-                          notify(`${item}案を選択しました`)
-                        }}
-                        className={`rounded-md border bg-white p-2 text-left ${
-                          generatedImageUrls.length === 0 && variant === item ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
-                        }`}
-                      >
-                        <div className="w-full overflow-hidden rounded-md" style={{ aspectRatio: aspectToCss[aspectRatio] }}>
-                          {generatedImageUrls.length > 0 ? (
-                            <img src={item as string} alt={`生成画像 ${index + 1}`} className="h-full w-full object-cover" />
-                          ) : (
-                            <CreativeCard variant={item as CreativeVariant} className="h-full border-0" small={false} />
-                          )}
+                    {(generatedImageUrls.length > 0 ? generatedImageUrls : variants).map((item, index) => {
+                      const isGeneratedUrl = generatedImageUrls.length > 0
+                      const selected = isGeneratedUrl ? selectedGeneratedImageUrl === item : variant === item
+
+                      return (
+                        <div
+                          key={typeof item === 'string' ? item : index}
+                          className={`rounded-md border bg-white p-2 text-left ${
+                            selected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+                          }`}
+                        >
+                          <div className="w-full overflow-hidden rounded-md" style={{ aspectRatio: aspectToCss[aspectRatio] }}>
+                            {isGeneratedUrl ? (
+                              <ExpandableMedia
+                                src={item as string}
+                                title={`生成画像 ${index + 1}`}
+                                type="画像"
+                                className="h-full w-full rounded-md border-0"
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setVariant(item as CreativeVariant)
+                                  notify(`${item}案を選択しました`)
+                                }}
+                                className="h-full w-full text-left"
+                              >
+                                <CreativeCard variant={item as CreativeVariant} className="h-full border-0" small={false} />
+                              </button>
+                            )}
+                          </div>
+                          <span className="mt-2 block text-xs font-semibold text-slate-600">
+                            {isGeneratedUrl ? `生成画像 ${index + 1}` : `候補: ${item}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isGeneratedUrl) {
+                                setSelectedGeneratedImageUrl(item as string)
+                                notify(`生成画像 ${index + 1} を保存対象にしました`)
+                                return
+                              }
+                              setVariant(item as CreativeVariant)
+                              notify(`${item}案を選択しました`)
+                            }}
+                            className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                              selected ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {selected ? '保存対象' : '保存対象にする'}
+                          </button>
                         </div>
-                        <span className="mt-2 block text-xs font-semibold text-slate-600">
-                          {generatedImageUrls.length > 0 ? `生成画像 ${index + 1}` : `候補: ${item}`}
-                        </span>
-                      </button>
-                    ))}
+                      )
+                    })}
                   </div>
+                  {selectedGeneratedImageUrl && (
+                    <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                      <span className="font-semibold text-slate-700">保存URL:</span>{' '}
+                      <span className="break-all">{selectedGeneratedImageUrl}</span>
+                    </div>
+                  )}
                   <div className="mt-4 flex flex-wrap justify-end gap-2">
                     <button type="button" onClick={() => onSave(generatedItem, 'content')} className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700">
                       <Save className="h-4 w-4" />
@@ -1451,10 +1642,12 @@ function VideoEditorView({
   onBack,
   onSave,
   notify,
+  onJobNotice,
 }: {
   onBack: () => void
-  onSave: (item: ContentItem, next?: 'stay' | 'content' | 'publish') => void
+  onSave: (item: ContentItem, next?: 'stay' | 'content' | 'publish', silent?: boolean) => void
   notify: Notify
+  onJobNotice: PushNotification
 }) {
   const [prompt, setPrompt] = useState('商品ボトルを自然光で見せる15秒のSNS広告動画。ゆっくりズームし、最後にCTAを表示')
   const [title, setTitle] = useState('AI生成PR動画')
@@ -1467,10 +1660,13 @@ function VideoEditorView({
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [selectedColor, setSelectedColor] = useState('#ffffff')
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState('')
+  const [generatedVideoUrls, setGeneratedVideoUrls] = useState<string[]>([])
+  const [currentVideoJobId, setCurrentVideoJobId] = useState('')
   const clips = ['00:00', '00:03', '00:06', '00:09', '00:12']
 
   const generatedItem: ContentItem = {
-    id: `asset-video-${title.replace(/\s/g, '-')}`,
+    id: currentVideoJobId || `asset-video-${title.replace(/\s/g, '-')}`,
     title,
     type: '動画',
     date: today,
@@ -1478,28 +1674,97 @@ function VideoEditorView({
     creative: variant,
     source: 'AI動画',
     prompt,
+    mediaUrl: generatedVideoUrl,
+    mediaUrls: generatedVideoUrls,
   }
 
   const runGenerate = () => {
-    startMockAiJob(setProgress, setGenerating, async () => {
+    if (!prompt.trim()) {
+      notify('動画プロンプトを入力してください')
+      return
+    }
+
+    const jobId = idFrom('asset-video-job')
+    const baseItem: ContentItem = {
+      id: jobId,
+      title,
+      type: '動画',
+      date: today,
+      status: '生成中',
+      creative: variant,
+      source: 'AI動画',
+      prompt,
+      progress: 8,
+    }
+
+    setCurrentVideoJobId(jobId)
+    setGeneratedVideoUrl('')
+    setGeneratedVideoUrls([])
+    setGenerating(true)
+    onSave(baseItem, 'stay', true)
+    notify('動画生成ジョブを開始しました。完了したら通知します')
+    onJobNotice('動画生成を開始しました', title, 'info')
+
+    let latestProgress = 8
+    const stopProgress = startEstimatedProgress(setProgress, (value) => {
+      latestProgress = value
+      onSave({ ...baseItem, progress: value }, 'stay', true)
+    })
+
+    ;(async () => {
       try {
-        await fetch('/api/generate-creative-video', {
+        const durationSeconds = Number(duration.replace('秒', ''))
+        const response = await fetch('/api/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt,
-            aspectRatio: aspect,
-            duration,
-            audio: audioEnabled,
-            model: 'video-generation-v1',
+            image_urls: [],
+            resolution: '720p',
+            duration: Number.isFinite(durationSeconds) ? durationSeconds : 'auto',
+            aspect_ratio: aspect,
+            generate_audio: audioEnabled,
           }),
         })
-      } catch {
-        notify('API応答がないため、ローカルプレビューで生成しました')
+        const data = await response.json()
+        if (!response.ok || data?.success === false || data?.error) {
+          throw new Error(data?.message ?? data?.error ?? '動画生成に失敗しました')
+        }
+        const urls = extractAssetUrls(data).filter((url) => /\.(mp4|mov|webm)(\?|$)/i.test(url) || url.includes('/video') || url.includes('fal.media'))
+        if (urls.length === 0) {
+          throw new Error('生成結果の動画URLを取得できませんでした')
+        }
+        const nextVariant = chooseVariantFromPrompt(prompt, variant)
+        setGeneratedVideoUrls(urls)
+        setGeneratedVideoUrl(urls[0] ?? '')
+        setVariant(nextVariant)
+        setProgress(100)
+        onSave({
+          ...baseItem,
+          status: '下書き',
+          creative: nextVariant,
+          mediaUrl: urls[0],
+          mediaUrls: urls,
+          progress: 100,
+          completedAt: new Date().toISOString(),
+        }, 'stay', true)
+        notify('動画生成が完了しました。コンテンツ一覧から投稿に使えます')
+        onJobNotice('動画生成が完了しました', `${title}をコンテンツ一覧に保存しました`, 'success')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '動画生成に失敗しました'
+        onSave({
+          ...baseItem,
+          status: '失敗',
+          progress: latestProgress,
+          errorMessage: message,
+        }, 'stay', true)
+        notify(message)
+        onJobNotice('動画生成に失敗しました', message, 'error')
+      } finally {
+        stopProgress()
+        setGenerating(false)
       }
-      setVariant(chooseVariantFromPrompt(prompt, variant))
-      notify('AI動画の絵コンテとプレビューを生成しました')
-    })
+    })()
   }
 
   return (
@@ -1609,11 +1874,22 @@ function VideoEditorView({
 
           <div className="grid flex-1 place-items-center">
             <div className="relative w-full max-w-[760px] overflow-hidden rounded-lg bg-slate-900 shadow-2xl" style={{ aspectRatio: aspect === '9:16' ? '9 / 16' : aspect === '1:1' ? '1 / 1' : '16 / 9' }}>
-              <CreativeCard variant={variant} className="h-full rounded-none border-0" editor />
-              <div className="absolute right-[16%] top-[18%] w-[30%] border border-blue-400 p-3">
-                <p className="text-5xl font-light leading-tight" style={{ color: selectedColor }}>New<br />Lifestyle</p>
-                <p className="mt-3 text-sm text-white/80">毎日に、やさしさを。</p>
-              </div>
+              {generatedVideoUrl ? (
+                <ExpandableMedia
+                  src={generatedVideoUrl}
+                  title={title}
+                  type="動画"
+                  className="h-full w-full rounded-none border-0 bg-black"
+                />
+              ) : (
+                <>
+                  <CreativeCard variant={variant} className="h-full rounded-none border-0" editor />
+                  <div className="absolute right-[16%] top-[18%] w-[30%] border border-blue-400 p-3">
+                    <p className="text-5xl font-light leading-tight" style={{ color: selectedColor }}>New<br />Lifestyle</p>
+                    <p className="mt-3 text-sm text-white/80">毎日に、やさしさを。</p>
+                  </div>
+                </>
+              )}
               <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-4 rounded-full bg-black/40 px-5 py-2">
                 <button type="button" onClick={() => setPlaying(false)} className="grid h-7 w-7 place-items-center rounded-full hover:bg-white/10">
                   <Pause className="h-4 w-4" />
@@ -1624,6 +1900,12 @@ function VideoEditorView({
                 <span className="text-xs">{playing ? '再生中' : '停止中'} / {duration}</span>
               </div>
             </div>
+            {generatedVideoUrl && (
+              <div className="mt-3 max-w-[760px] rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+                <span className="font-semibold text-white">保存URL:</span>{' '}
+                <span className="break-all">{generatedVideoUrl}</span>
+              </div>
+            )}
           </div>
 
           <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-3">
@@ -1879,7 +2161,7 @@ function ContentListView({
           </button>
         }
       />
-      <Tabs labels={['すべて', '画像', '動画', '下書き']} active={tab} onChange={setTab} />
+      <Tabs labels={['すべて', '画像', '動画', '生成中', '下書き', '失敗']} active={tab} onChange={setTab} />
       <div className="space-y-4 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative max-w-md flex-1">
@@ -1908,26 +2190,63 @@ function ContentListView({
               {filtered.map((item) => (
                 <tr key={item.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <CreativeCard variant={item.creative} small className="h-14 w-20" />
+                    <ContentPreview item={item} className="h-14 w-20" />
                   </td>
                   <td className="font-medium text-slate-800">{item.title}</td>
                   <td>{item.type}</td>
                   <td>{item.date}</td>
-                  <td>{item.source}</td>
+                  <td>
+                    <span>{item.source}</span>
+                    {item.mediaUrl && (
+                      <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                        URL保存済み
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <StatusBadge status={item.status} />
+                    {item.status === '生成中' && (
+                      <div className="mt-2 w-28">
+                        <ProgressBar value={Math.min(item.progress ?? 8, 92)} compact />
+                      </div>
+                    )}
+                    {item.status === '失敗' && item.errorMessage && (
+                      <p className="mt-1 max-w-40 truncate text-xs text-red-600">{item.errorMessage}</p>
+                    )}
                   </td>
                   <td>
                     <div className="flex gap-1">
                       <button type="button" onClick={() => onEdit(item)} className="rounded-md px-3 py-2 text-slate-700 hover:bg-slate-100">
                         編集
                       </button>
-                      <button type="button" onClick={() => onPublish(item)} className="rounded-md px-3 py-2 text-blue-700 hover:bg-blue-50">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (item.status === '生成中') {
+                            notify('生成完了後に投稿設定へ進めます')
+                            return
+                          }
+                          onPublish(item)
+                        }}
+                        className="rounded-md px-3 py-2 text-blue-700 hover:bg-blue-50"
+                      >
                         投稿設定
                       </button>
                       <button type="button" onClick={() => notify(`${item.title}を複製しました`)} className="grid h-9 w-9 place-items-center rounded-md text-slate-600 hover:bg-slate-100">
                         <Copy className="h-4 w-4" />
                       </button>
+                      {item.mediaUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(item.mediaUrl ?? '')
+                            notify('保存URLをコピーしました')
+                          }}
+                          className="rounded-md px-3 py-2 text-slate-700 hover:bg-slate-100"
+                        >
+                          URL
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1976,9 +2295,15 @@ function PublishView({
       <Tabs labels={['通常投稿', '広告として投稿']} active={mode} onChange={setMode} />
       <div className="grid gap-6 p-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <Panel title="選択したコンテンツ">
-          <CreativeCard variant={item.creative} className="mb-3" />
+          <ContentPreview item={item} compact={false} className="mb-3 aspect-[1.9/1] w-full" />
           <p className="text-sm font-semibold text-slate-900">{item.title}</p>
           <p className="text-xs text-slate-500">{item.date} · {item.source}</p>
+          {item.mediaUrl && (
+            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              <p className="font-semibold text-slate-700">投稿に使う保存URL</p>
+              <p className="mt-1 break-all">{item.mediaUrl}</p>
+            </div>
+          )}
           <div className="mt-4 space-y-2">
             {items.slice(0, 4).map((candidate) => (
               <button
@@ -1989,13 +2314,23 @@ function PublishView({
                   candidate.id === item.id ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <CreativeCard variant={candidate.creative} small className="h-9 w-12" />
+                <ContentPreview item={candidate} className="h-9 w-12" expandable={false} />
                 <span className="min-w-0 truncate">{candidate.title}</span>
               </button>
             ))}
           </div>
         </Panel>
         <section className="space-y-4">
+          {item.status === '生成中' && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              このコンテンツはまだ生成中です。完了通知が届いたら投稿できます。
+            </div>
+          )}
+          {item.status === '失敗' && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              生成に失敗したため投稿できません。作成ツールから再生成してください。
+            </div>
+          )}
           {posted && (
             <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
               <CheckCircle2 className="h-4 w-4" />
@@ -2036,6 +2371,14 @@ function PublishView({
             <button
               type="button"
               onClick={() => {
+                if (item.status === '生成中') {
+                  notify('生成完了後に投稿できます')
+                  return
+                }
+                if (item.status === '失敗') {
+                  notify('生成に失敗したコンテンツは投稿できません')
+                  return
+                }
                 if (platforms.length === 0) {
                   notify('投稿先を1つ以上選択してください')
                   return
@@ -2043,7 +2386,8 @@ function PublishView({
                 setPosted(true)
                 notify(schedule ? '予約投稿を設定しました' : '投稿リクエストを送信しました')
               }}
-              className="rounded-full bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white"
+              className="rounded-full bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={item.status === '生成中' || item.status === '失敗'}
             >
               {schedule ? '予約する' : '投稿する'}
             </button>
@@ -2082,25 +2426,44 @@ function SearchView({ notify }: { notify: Notify }) {
   )
 }
 
-function NotificationsView({ notify }: { notify: Notify }) {
+function NotificationsView({
+  notify,
+  items,
+  onClear,
+}: {
+  notify: Notify
+  items: AppNotification[]
+  onClear: () => void
+}) {
   const [tab, setTab] = useState('すべて')
-  const notifications = [
-    ['Brand Officialがあなたの投稿をいいねしました', '2分前'],
-    ['Design Lifeがあなたをフォローしました', '18分前'],
-    ['AI動画の生成が完了しました', '1時間前'],
-  ]
+  const visibleItems = items.filter((item) => {
+    if (tab === '生成') return item.title.includes('生成')
+    if (tab === 'エラー') return item.kind === 'error'
+    return true
+  })
 
   return (
     <section className="min-h-screen bg-white">
-      <HeaderBlock title="通知" action={<button type="button" onClick={() => notify('通知をすべて既読にしました')} className="text-sm font-semibold text-blue-700">すべて既読</button>} />
-      <Tabs labels={['すべて', '認証済み', 'メンション']} active={tab} onChange={setTab} />
+      <HeaderBlock title="通知" action={<button type="button" onClick={onClear} className="text-sm font-semibold text-blue-700">すべて既読</button>} />
+      <Tabs labels={['すべて', '生成', 'エラー']} active={tab} onChange={setTab} />
       <div className="divide-y divide-slate-200">
-        {notifications.map(([title, time]) => (
-          <button key={title} type="button" onClick={() => notify(title)} className="flex w-full gap-3 px-5 py-4 text-left hover:bg-slate-50">
-            <Bell className="mt-1 h-4 w-4 text-blue-600" />
-            <span><strong className="block text-sm">{title}</strong><span className="text-xs text-slate-500">{time} · {tab}</span></span>
+        {visibleItems.map((item) => (
+          <button key={item.id} type="button" onClick={() => notify(item.title)} className="flex w-full gap-3 px-5 py-4 text-left hover:bg-slate-50">
+            <Bell className={`mt-1 h-4 w-4 ${
+              item.kind === 'success' ? 'text-emerald-600' : item.kind === 'error' ? 'text-red-600' : 'text-blue-600'
+            }`} />
+            <span className="min-w-0">
+              <strong className="block truncate text-sm">{item.title}</strong>
+              {item.detail && <span className="mt-0.5 block truncate text-xs text-slate-600">{item.detail}</span>}
+              <span className="text-xs text-slate-500">{item.time} · {tab}</span>
+            </span>
           </button>
         ))}
+        {visibleItems.length === 0 && (
+          <div className="px-5 py-10 text-center text-sm text-slate-500">
+            表示できる通知はありません
+          </div>
+        )}
       </div>
     </section>
   )
@@ -2260,6 +2623,154 @@ function Panel({
       <h2 className="mb-4 text-sm font-semibold text-slate-950">{title}</h2>
       {children}
     </section>
+  )
+}
+
+function MediaLightbox({
+  src,
+  title,
+  type,
+  onClose,
+}: {
+  src: string
+  title: string
+  type: ContentType
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/80 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-5xl overflow-hidden rounded-lg border border-white/10 bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-950">{title}</p>
+            <p className="truncate text-xs text-slate-500">{src}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+            aria-label="閉じる"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid max-h-[78vh] place-items-center bg-slate-950 p-3">
+          {type === '動画' ? (
+            <video src={src} controls autoPlay className="max-h-[72vh] w-full rounded-md object-contain" />
+          ) : (
+            <img src={src} alt={title} className="max-h-[72vh] w-full rounded-md object-contain" />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExpandableMedia({
+  src,
+  title,
+  type,
+  className = '',
+  badge,
+  objectFit = 'object-cover',
+}: {
+  src: string
+  title: string
+  type: ContentType
+  className?: string
+  badge?: string
+  objectFit?: 'object-cover' | 'object-contain'
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen(true)
+        }}
+        className={`group relative block overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-left ${className}`}
+      >
+        {type === '動画' ? (
+          <video src={src} className={`h-full w-full ${objectFit}`} muted playsInline />
+        ) : (
+          <img src={src} alt={title} className={`h-full w-full ${objectFit}`} />
+        )}
+        {badge && (
+          <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            {badge}
+          </span>
+        )}
+        <span className="absolute left-1 top-1 inline-flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white opacity-0 transition group-hover:opacity-100">
+          <Maximize2 className="h-3 w-3" />
+          拡大
+        </span>
+      </button>
+      {open && <MediaLightbox src={src} title={title} type={type} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+function ContentPreview({
+  item,
+  className = '',
+  compact = true,
+  expandable = true,
+}: {
+  item: ContentItem
+  className?: string
+  compact?: boolean
+  expandable?: boolean
+}) {
+  if (item.mediaUrl) {
+    if (expandable) {
+      return <ExpandableMedia src={item.mediaUrl} title={item.title} type={item.type} className={className} badge="URL" />
+    }
+
+    return (
+      <div className={`relative overflow-hidden rounded-lg border border-slate-200 bg-slate-100 ${className}`}>
+        {item.type === '動画' ? (
+          <video src={item.mediaUrl} className="h-full w-full object-cover" muted playsInline />
+        ) : (
+          <img src={item.mediaUrl} alt={item.title} className="h-full w-full object-cover" />
+        )}
+        <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+          URL
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`relative overflow-hidden rounded-lg ${className}`}>
+      <CreativeCard variant={item.creative} small={compact} className="h-full w-full" />
+      {item.status === '生成中' && (
+        <div className="absolute inset-0 grid place-items-center bg-white/75 text-xs font-semibold text-blue-700">
+          生成中 {Math.round(Math.min(item.progress ?? 8, 92))}%
+        </div>
+      )}
+      {item.status === '失敗' && (
+        <div className="absolute inset-0 grid place-items-center bg-red-50/85 text-xs font-semibold text-red-700">
+          失敗
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -2559,13 +3070,21 @@ function SegmentedControl({
   )
 }
 
-function ProgressBar({ value, dark = false }: { value: number; dark?: boolean }) {
+function ProgressBar({
+  value,
+  dark = false,
+  compact = false,
+}: {
+  value: number
+  dark?: boolean
+  compact?: boolean
+}) {
   return (
-    <div className="flex min-w-[180px] items-center gap-2">
+    <div className={`flex items-center gap-2 ${compact ? 'min-w-0' : 'min-w-[180px]'}`}>
       <div className={`h-2 flex-1 overflow-hidden rounded-full ${dark ? 'bg-white/10' : 'bg-slate-200'}`}>
         <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${value}%` }} />
       </div>
-      <span className={`w-9 text-xs ${dark ? 'text-slate-300' : 'text-slate-500'}`}>{Math.round(value)}%</span>
+      <span className={`${compact ? 'w-7' : 'w-9'} text-xs ${dark ? 'text-slate-300' : 'text-slate-500'}`}>{Math.round(value)}%</span>
     </div>
   )
 }
@@ -2642,7 +3161,9 @@ function StatusBadge({ status }: { status: ContentStatus }) {
           ? 'bg-emerald-50 text-emerald-700'
           : status === '生成中'
             ? 'bg-blue-50 text-blue-700'
-            : 'bg-amber-50 text-amber-700'
+            : status === '失敗'
+              ? 'bg-red-50 text-red-700'
+              : 'bg-amber-50 text-amber-700'
       }`}
     >
       {status}
